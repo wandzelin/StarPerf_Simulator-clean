@@ -3,18 +3,20 @@
 import math
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
 import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
-from equal_area_partition import EARTH_RADIUS_KM, approximate_equal_area_grid, EqualAreaGrid
+
+from equal_area_partition import EqualAreaCell, EqualAreaGrid, approximate_equal_area_grid
 
 
 POP_TIF_PATH = "data/pop/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif"  # 人口“人数”GeoTIFF（WGS84, 30″）
-TOTAL_USERS  = 1944  # 全球总用户数
+TOTAL_USERS = 1944  # 全球总用户数
 
 
-def _normalise_interval(value, default):
+def _normalise_interval(value: Optional[Sequence[float]], default: Sequence[float]) -> Tuple[float, float]:
     if value is None:
         value = default
     start, end = value
@@ -26,15 +28,16 @@ def _normalise_interval(value, default):
         raise ValueError("Interval span must be non-zero.")
     return start, end
 
-def population_distribution_density(
-    centers,
-    grid,
-    tif_path,
-    lat_min,
-    lat_max,
-    lon_min,
-    lon_max,
-):
+
+def _population_weights_from_raster(
+    centers: Iterable[Tuple[float, float]],
+    grid: EqualAreaGrid,
+    tif_path: str,
+    lat_min: float,
+    lat_max: float,
+    lon_min: float,
+    lon_max: float,
+) -> np.ndarray:
     """Compute per-cell population weights from raster data."""
 
     half_lon_deg = math.degrees(grid.step_a / (2.0 * grid.radius_km))
@@ -42,17 +45,15 @@ def population_distribution_density(
 
     if tif_path and os.path.exists(tif_path):
         with rasterio.open(tif_path) as ds:
-            weights = []
-            lon_offset = half_lon_deg
-            sin_half = half_sin
+            weights: List[float] = []
             for lat, lon in centers:
                 sin_lat = math.sin(math.radians(lat))
-                sin_bottom = max(-1.0, min(1.0, sin_lat - sin_half))
-                sin_top = max(-1.0, min(1.0, sin_lat + sin_half))
+                sin_bottom = max(-1.0, min(1.0, sin_lat - half_sin))
+                sin_top = max(-1.0, min(1.0, sin_lat + half_sin))
                 bottom = max(lat_min, math.degrees(math.asin(sin_bottom)))
                 top = min(lat_max, math.degrees(math.asin(sin_top)))
-                left = max(lon_min, lon - lon_offset)
-                right = min(lon_max, lon + lon_offset)
+                left = max(lon_min, lon - half_lon_deg)
+                right = min(lon_max, lon + half_lon_deg)
                 if right <= left or top <= bottom:
                     weights.append(0.0)
                     continue
@@ -74,10 +75,48 @@ def population_distribution_density(
         w = np.ones(grid.m * grid.n, dtype=float)
     return w
 
-def population_distribution_uniform(cell_count):
-    """Return uniform weights when no raster-based weighting is desired."""
 
-    return np.ones(cell_count, dtype=float)
+def _allocate_uniform(total_users: int, cell_count: int) -> np.ndarray:
+    """Deterministically split users evenly across all cells."""
+
+    base = total_users // cell_count
+    remainder = total_users % cell_count
+    alloc = np.full(cell_count, base, dtype=int)
+    if remainder > 0:
+        alloc[:remainder] += 1
+    return alloc
+
+
+def _allocate_from_weights(weights: np.ndarray, total_users: int) -> np.ndarray:
+    """Convert population weights into integer user counts per cell."""
+
+    normalised = weights / weights.sum()
+    raw = normalised * total_users
+    floored = np.floor(raw).astype(int)
+    remaining = total_users - floored.sum()
+    if remaining < 0:
+        raise ValueError("整数分配结果超过总用户数，请检查人口权重")
+    if remaining > 0:
+        residual = raw - floored
+        order = np.argsort(-residual)
+        take = min(remaining, len(order))
+        floored[order[:take]] += 1
+        remaining -= take
+    if remaining > 0:
+        raise ValueError("仍有剩余用户未能分配，请检查权重计算是否正确")
+    return floored
+
+
+def _create_user(USER_module, cell: EqualAreaCell):
+    """Instantiate a user at the centre of a grid cell with annotated metadata."""
+
+    user_obj = USER_module.user(cell.longitude, cell.latitude)
+    user_obj.cell_id = cell.cell_id
+    user_obj.cell_row = cell.i
+    user_obj.cell_col = cell.j
+    user_obj.cell_latitude = cell.latitude
+    user_obj.cell_longitude = cell.longitude
+    return user_obj
 
 @dataclass
 class PopulationAllocation:
@@ -99,21 +138,25 @@ def build_users_by_population(
     delta_a,
     delta_b,
     distribution,
-    max_users_per_cell=None,
-):
+) -> PopulationAllocation:
+    """Generate user objects at grid centres based on chosen population distribution."""
+
     if lat_range is None or lon_range is None:
-        raise ValueError('lat_range and lon_range must be provided by the caller')
+        raise ValueError("lat_range and lon_range must be provided by the caller")
     if delta_a is None or delta_b is None:
-        raise ValueError('delta_a and delta_b must be provided (kilometres)')
+        raise ValueError("delta_a and delta_b must be provided (kilometres)")
     if not distribution:
         raise ValueError("distribution must be specified (e.g. 'density' or 'uniform')")
-    
-    """Generate user objects at grid centres based on chosen population distribution."""
+
+    distribution = distribution.lower()
+    if distribution not in {"uniform", "density"}:
+        raise ValueError(f"Unsupported distribution mode: {distribution}")
+
     lat_min, lat_max = _normalise_interval(lat_range, lat_range)
     lon_min, lon_max = _normalise_interval(lon_range, lon_range)
 
-    delta_a = float(delta_a) 
-    delta_b = float(delta_b) 
+    delta_a = float(delta_a)
+    delta_b = float(delta_b)
 
     grid = approximate_equal_area_grid(
         (lat_min, lat_max),
@@ -121,23 +164,17 @@ def build_users_by_population(
         delta_a,
         delta_b,
     )
-    centers = grid.centres
-    G = grid.m * grid.n
 
-    total_users = max(total_users, G)  # 保证每格至少 1 用户
+    total_users = int(total_users)
+    if total_users < 0:
+        raise ValueError("total_users 不能为负数")
 
-    if max_users_per_cell is None:
-        max_cap = total_users
-    else:
-        max_cap = max(1, int(max_users_per_cell))
-
-    # 1) 根据选择的模式获取人口权重
+    cell_count = grid.m * grid.n
     if distribution == "uniform":
-        total_users = G
-        alloc = np.ones(G, dtype=int)
+        alloc = _allocate_uniform(total_users, cell_count)
     else:
-        w = population_distribution_density(
-            centers,
+        weights = _population_weights_from_raster(
+            grid.centres,
             grid,
             tif_path,
             lat_min,
@@ -145,44 +182,17 @@ def build_users_by_population(
             lon_min,
             lon_max,
         )
+        alloc = _allocate_from_weights(weights, total_users)
 
-        raw = w / w.sum() * total_users
-        flo = np.floor(raw).astype(int)
-        flo = np.minimum(flo, max_cap)
-        alloc = flo
-        remaining = total_users - alloc.sum()
-        if remaining < 0:
-            raise ValueError("整数分配结果超过总用户数，请检查人口权重")
-        if remaining > 0:
-            residual = raw - flo
-            available = np.full(G, max_cap, dtype=int) - alloc
-            order = np.argsort(-residual)
-            for idx in order:
-                if remaining <= 0:
-                    break
-                if available[idx] <= 0:
-                    continue
-                take = min(available[idx], remaining)
-                alloc[idx] += int(take)
-                available[idx] -= int(take)
-                remaining -= int(take)
-            if remaining > 0:
-                raise ValueError("仍有剩余用户无法分配到未超上限的小区中")
-
-    # 2) 生成用户对象并记录小区归属
     users: List[Any] = []
     cell_user_map: Dict[int, List[Any]] = {cell.cell_id: [] for cell in grid.cells}
-    cell_users = []
-    for idx, ((lat, lon), cnt) in enumerate(zip(centers, alloc)):
-        cell = grid.cells[idx]
-        cell_users.append(int(cnt))
-        for _ in range(int(cnt)):
-            user_obj = USER_module.user(lat, lon)
-            setattr(user_obj, "cell_id", cell.cell_id)
-            setattr(user_obj, "cell_row", cell.i)
-            setattr(user_obj, "cell_col", cell.j)
-            setattr(user_obj, "cell_latitude", cell.latitude)
-            setattr(user_obj, "cell_longitude", cell.longitude)
+    cell_users: List[int] = []
+
+    for cell, count in zip(grid.cells, alloc):
+        count = int(count)
+        cell_users.append(count)
+        for _ in range(count):
+            user_obj = _create_user(USER_module, cell)
             users.append(user_obj)
             cell_user_map[cell.cell_id].append(user_obj)
 
@@ -192,5 +202,5 @@ def build_users_by_population(
         distribution=distribution,
         cell_users=cell_users,
         cell_user_map=cell_user_map,
-        total_users=int(sum(cell_users)),
+        total_users=sum(cell_users),
     )

@@ -1,23 +1,25 @@
-import src.XML_constellation.constellation_entity.user as USER
-import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
-import src.XML_constellation.constellation_connectivity.connectivity_mode_plugin_manager as connectivity_mode_plugin_manager
-import src.XML_constellation.constellation_evaluation.exists_ISL.delay as DELAY
-# from entity import *
-# from utils import *
+import argparse
 import math
 from typing import Dict, List, Tuple
-from equal_area_partition import EARTH_RADIUS_KM, EqualAreaGrid, EqualAreaCell
-import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
-import random
+
 import numpy as np
-import matplotlib.pyplot as plt
-from pop_user_allocator import build_users_by_population, TOTAL_USERS, POP_TIF_PATH, PopulationAllocation
-from utils import plot_andSave, latilong_to_descartes, judgePointToSatellite, calculate_distance
-from delay import delay
-from select_satellite import select_nearest, select_weighted
-from entity import T2TuserTraffic, T2CuserFeedback, U2Svisible, satellite_beam, U2Svisible, gatway, central_node
 import scipy.constants as C
-import argparse
+
+import src.XML_constellation.constellation_entity.user as USER
+import src.XML_constellation.constellation_connectivity.connectivity_mode_plugin_manager as connectivity_mode_plugin_manager
+import src.XML_constellation.constellation_evaluation.exists_ISL.delay as DELAY
+import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
+from delay import delay
+from entity import T2TuserTraffic, U2Svisible, central_node, gatway, satellite_beam
+from equal_area_partition import EqualAreaCell, EqualAreaGrid
+from pop_user_allocator import (
+    POP_TIF_PATH,
+    TOTAL_USERS,
+    PopulationAllocation,
+    build_users_by_population,
+)
+from select_satellite import select_weighted
+from utils import calculate_distance, judgePointToSatellite, latilong_to_descartes, plot_andSave
 
 # 仿真参数：总时长 2 小时、时隙 60 秒
 SIMULATION_DURATION = 2 * 60 * 60
@@ -26,20 +28,17 @@ TIME_SLOT = 60
 CENTER_NODE_LOCATION: Tuple[float, float] = (104.0, 35.0)
 
 def init_user(
-    lat_range=(-60, 60),
-    lon_range=(-90, 90),
-    delta_a=1000,
-    delta_b=1000,
-    distribution="density",
-    total_users=TOTAL_USERS,
-    tif_path=POP_TIF_PATH,
-    max_users_per_cell=None,
-):
-    
-    delta_a = float(delta_a)
-    delta_b = float(delta_b)
+    lat_range: Tuple[float, float] = (-60, 60),
+    lon_range: Tuple[float, float] = (-90, 90),
+    delta_a: float = 1000,
+    delta_b: float = 1000,
+    distribution: str = "density",
+    total_users: int = TOTAL_USERS,
+    tif_path: str = POP_TIF_PATH,
+) -> PopulationAllocation:
+    """Build a population allocation within the requested geographic window."""
 
-    allocation = build_users_by_population(
+    return build_users_by_population(
         USER_module=USER,
         total_users=total_users,
         tif_path=tif_path,
@@ -48,9 +47,7 @@ def init_user(
         delta_a=delta_a,
         delta_b=delta_b,
         distribution=distribution,
-        max_users_per_cell=max_users_per_cell
     )
-    return allocation
 
 def init_gatway(capacity):
     gatways = []
@@ -87,7 +84,7 @@ def init_central_node(capacity, gatways):
     """构建与信关站星型互联的地面中心节点。"""
 
     lon, lat = CENTER_NODE_LOCATION
-    center = central_node(lon, lat, capacity, connected_gateways=gatways,node_name="中心节点")
+    center = central_node(lon, lat, capacity, connected_gateways=gatways, node_name="中心节点")
     return center
 
 def _normalise_longitude(lon: float) -> float:
@@ -117,12 +114,12 @@ def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
 def _create_virtual_user(cell: EqualAreaCell):
     """为缺失用户的小区生成临时用户，用于保持连接逻辑完整。"""
 
-    user_obj = USER.user(cell.latitude, cell.longitude)
-    setattr(user_obj, "cell_id", cell.cell_id)
-    setattr(user_obj, "cell_row", cell.i)
-    setattr(user_obj, "cell_col", cell.j)
-    setattr(user_obj, "cell_latitude", cell.latitude)
-    setattr(user_obj, "cell_longitude", cell.longitude)
+    user_obj = USER.user(cell.longitude, cell.latitude)
+    user_obj.cell_id = cell.cell_id
+    user_obj.cell_row = cell.i
+    user_obj.cell_col = cell.j
+    user_obj.cell_latitude = cell.latitude
+    user_obj.cell_longitude = cell.longitude
     return user_obj
 
 def generate_opposite_t2t_connections(
@@ -185,6 +182,8 @@ def generate_opposite_t2t_connections(
             )
 
     return connections
+
+
 def generate_centralised_t2c_connections(
     allocation: PopulationAllocation,
     center: central_node,
@@ -282,12 +281,6 @@ def main():
         default=TOTAL_USERS,
         help='总体用户规模，density 模式下生效。'
     )
-    parser.add_argument(
-        '--max_users_per_cell',
-        type=int,
-        default=None,
-        help='限制每个小区的最大用户数，缺省表示不设上限'
-    )
     args = parser.parse_args()
     run_t2t(args)
     print("t2t done")
@@ -309,7 +302,6 @@ def run_t2t(args):
     allocation = init_user(
         distribution=args.population_distribution,
         total_users=args.total_users,
-        max_users_per_cell=args.max_users_per_cell,
     )
     users = allocation.users
     user_num = len(users)
@@ -426,7 +418,6 @@ def run_t2c(args):
     allocation = init_user(
         distribution=args.population_distribution,
         total_users=args.total_users,
-        max_users_per_cell=args.max_users_per_cell,
     )
     users = allocation.users
     user_num = len(users)

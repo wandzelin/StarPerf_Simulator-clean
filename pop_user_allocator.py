@@ -82,7 +82,6 @@ def population_distribution_uniform(cell_count):
 @dataclass
 class PopulationAllocation:
     """Container for population allocation results shared across modules."""
-
     users: List[Any]
     grid: EqualAreaGrid
     distribution: str

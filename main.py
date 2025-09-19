@@ -63,24 +63,6 @@ def init_gatway(capacity):
         gatways.append(gatway(lon, lat, capacity, gateway_name=name))
     return gatways
 
-# def generat_random_connect(user_list, connect_num, need_bandwidth, max_bandwidth, min_bandwidth):
-#     connect_tuple = []
-#     user_num = len(user_list)
-#     for _ in range(connect_num):
-#         i, j = random.sample(range(user_num), 2)
-#         connect = T2TuserTraffic(user_list[i], user_list[j], need_bandwidth, max_bandwidth, min_bandwidth)
-#         connect_tuple.append(connect)
-#     return connect_tuple
-
-# def generat_random_t2c_connect(user_list, gatway_list, connect_num, need_bandwidth, max_bandwidth, min_bandwidth):
-#     connect_tuple = []
-#     user_num = len(user_list)
-#     gatway_num = len(gatway_list)
-#     for _ in range(connect_num):
-#         i, j = random.sample(range(user_num), 1)[0], random.sample(range(gatway_num), 1)[0]
-#         connect = T2TuserTraffic(user_list[i], gatway_list[j], need_bandwidth, max_bandwidth, min_bandwidth)
-#         connect_tuple.append(connect)
-#     return connect_tuple
 def init_central_node(capacity, gatways):
     """构建与信关站星型互联的地面中心节点。"""
 
@@ -97,14 +79,14 @@ def _normalise_longitude(lon: float) -> float:
     return normalised - 180.0
 
 def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
-    """Great-circle separation in degrees between two longitudes."""
+    """经度差大于180则折算成另一侧的差值。"""
     diff = abs(lon_a - lon_b)
     if diff > 180.0:
         diff = 360.0 - diff
     return diff
-
+#grid=小区类 grid.cells=小区列表 cell=小区
 def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
-    """以小区中心点为键构建索引，用于快速查找对置单元。"""
+    """以小区中心点坐标为键索引小区id，用于快速根据对置小区中心点坐标查找对置小区id。"""
 
     lookup: Dict[Tuple[float, float], int] = {}
     for cell in grid.cells:

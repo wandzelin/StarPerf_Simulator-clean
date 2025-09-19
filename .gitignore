@@ -1,0 +1,15 @@
+﻿*.zip
+*.7z
+*.rar
+*.exe
+*.dll
+*.bin
+*.iso
+*.mp4
+*.avi
+*.jpg
+*.png
+/data/
+/output/
+/build/
+/dist/

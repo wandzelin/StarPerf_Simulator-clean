@@ -35,7 +35,7 @@ class U2Svisible:
         else:
             bw = min_bandwidth + (max_bandwidth - min_bandwidth)/8 * int(8 * angle/(90 - min_visible_angle))
             self.bandwidth = bw
-    
+    #123
 class satellite_beam:
     def __init__(self, user_capacity, capacity) -> None:
         self.connected_user = 0

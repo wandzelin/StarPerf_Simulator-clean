@@ -33,7 +33,6 @@ def init_user(
     distribution="density",
     total_users=TOTAL_USERS,
     tif_path=POP_TIF_PATH,
-    max_users_per_cell=None,
 ):
     
     delta_a = float(delta_a)
@@ -48,7 +47,6 @@ def init_user(
         delta_a=delta_a,
         delta_b=delta_b,
         distribution=distribution,
-        max_users_per_cell=max_users_per_cell
     )
     return allocation
 
@@ -282,12 +280,6 @@ def main():
         default=TOTAL_USERS,
         help='总体用户规模，density 模式下生效。'
     )
-    parser.add_argument(
-        '--max_users_per_cell',
-        type=int,
-        default=None,
-        help='限制每个小区的最大用户数，缺省表示不设上限'
-    )
     args = parser.parse_args()
     run_t2t(args)
     print("t2t done")
@@ -309,7 +301,6 @@ def run_t2t(args):
     allocation = init_user(
         distribution=args.population_distribution,
         total_users=args.total_users,
-        max_users_per_cell=args.max_users_per_cell,
     )
     users = allocation.users
     user_num = len(users)
@@ -426,7 +417,6 @@ def run_t2c(args):
     allocation = init_user(
         distribution=args.population_distribution,
         total_users=args.total_users,
-        max_users_per_cell=args.max_users_per_cell,
     )
     users = allocation.users
     user_num = len(users)

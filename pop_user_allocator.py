@@ -99,7 +99,6 @@ def build_users_by_population(
     delta_a,
     delta_b,
     distribution,
-    max_users_per_cell=None,
 ):
     if lat_range is None or lon_range is None:
         raise ValueError('lat_range and lon_range must be provided by the caller')
@@ -124,17 +123,18 @@ def build_users_by_population(
     centers = grid.centres
     G = grid.m * grid.n
 
-    total_users = max(total_users, G)  # 保证每格至少 1 用户
-
-    if max_users_per_cell is None:
-        max_cap = total_users
-    else:
-        max_cap = max(1, int(max_users_per_cell))
+    total_users = int(total_users)
+    if total_users < 0:
+        raise ValueError("total_users 不能为负数")
 
     # 1) 根据选择的模式获取人口权重
     if distribution == "uniform":
-        total_users = G
-        alloc = np.ones(G, dtype=int)
+        base = total_users // G
+        remainder = total_users % G
+        alloc = np.full(G, base, dtype=int)
+        if remainder > 0:
+            # 将余数分配给前 remainder 个小区，保持确定性
+            alloc[:remainder] += 1
     else:
         w = population_distribution_density(
             centers,
@@ -148,26 +148,20 @@ def build_users_by_population(
 
         raw = w / w.sum() * total_users
         flo = np.floor(raw).astype(int)
-        flo = np.minimum(flo, max_cap)
         alloc = flo
         remaining = total_users - alloc.sum()
         if remaining < 0:
             raise ValueError("整数分配结果超过总用户数，请检查人口权重")
         if remaining > 0:
             residual = raw - flo
-            available = np.full(G, max_cap, dtype=int) - alloc
             order = np.argsort(-residual)
             for idx in order:
                 if remaining <= 0:
                     break
-                if available[idx] <= 0:
-                    continue
-                take = min(available[idx], remaining)
-                alloc[idx] += int(take)
-                available[idx] -= int(take)
-                remaining -= int(take)
+                alloc[idx] += 1
+                remaining -= 1
             if remaining > 0:
-                raise ValueError("仍有剩余用户无法分配到未超上限的小区中")
+                raise ValueError("仍有剩余用户未能分配，请检查权重计算是否正确")
 
     # 2) 生成用户对象并记录小区归属
     users: List[Any] = []

@@ -1,0 +1,16 @@
+<config_parameters>
+    <carrier_frequency>11.9</carrier_frequency>
+    <atmospheric_attenuation>0.05</atmospheric_attenuation>
+    <minimum_elevation>15</minimum_elevation>
+    <Rician_small_scale_fading>100</Rician_small_scale_fading>
+    <transmit_power>40</transmit_power>
+    <transmitter_antenna_gains>10</transmitter_antenna_gains>
+    <receiver_antenna_gains>10</receiver_antenna_gains>
+    <noise_density>-173</noise_density>
+    <bandwidth>10</bandwidth>
+    <H>2</H>
+    <sigma>2</sigma>
+    <GS_antennae_number>2</GS_antennae_number>
+    <satellite_beam_number>2</satellite_beam_number>
+    <correction_factor>0.5</correction_factor>
+</config_parameters>

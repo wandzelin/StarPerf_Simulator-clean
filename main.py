@@ -78,7 +78,8 @@ class SimulationConfig:
         return self
 
 def init_user(
-    *,
+
+    
     lat_range: Tuple[float, float] = (-60, 60),
     lon_range: Tuple[float, float] = (-90, 90),
     delta_a: float = 1000,
@@ -90,6 +91,7 @@ def init_user(
     """Create user objects by delegating to the population allocator."""
 
     return build_users_by_population(
+
         USER_module=USER,
         total_users=total_users,
         tif_path=tif_path,
@@ -360,6 +362,7 @@ def parse_args() -> SimulationConfig:
         default=TOTAL_USERS,
         help="总体用户规模，density 模式下生效。",
     )
+
     parser.add_argument(
         "--constellation_name",
         type=str,
@@ -372,12 +375,15 @@ def parse_args() -> SimulationConfig:
 def main():
     config = parse_args()
     run_t2t(config)
+
     print("t2t done")
 
 def run_t2t(config: SimulationConfig):
     allocation = init_user(
+
         distribution=config.population_distribution,
         total_users=config.total_users,
+
     )
 
     connections = generate_opposite_t2t_connections(

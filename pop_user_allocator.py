@@ -1,5 +1,5 @@
-# 功能：用 GHS-POP 2020（30″，WGS84）的“人口数”GeoTIFF，为 10°×10° 网格中心分配 1~N 个用户
-# 只保留：每格≥1；总量=TOTAL_USERS；最大余数法整数分配；缺数据时退化为均匀
+# Description: use GHS-POP raster to allocate users onto a 10x10 degree grid
+# Notes: ensure at least one user per cell; fallback to uniform weights when raster missing
 import math
 import os
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
-from equal_area_partition import EARTH_RADIUS_KM, approximate_equal_area_grid
+from equal_area_partition import EARTH_RADIUS_KM, approximate_equal_area_grid, EqualAreaGrid
 
 
 POP_TIF_PATH = "data/pop/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif"  # 人口“人数”GeoTIFF（WGS84, 30″）
@@ -35,7 +35,7 @@ def population_distribution_density(
     lon_min,
     lon_max,
 ):
-    """按照真实人口栅格计算每个小区的权重。"""
+    """Compute per-cell population weights from raster data."""
 
     half_lon_deg = math.degrees(grid.step_a / (2.0 * grid.radius_km))
     half_sin = grid.step_b / (2.0 * grid.radius_km)
@@ -70,18 +70,18 @@ def population_distribution_density(
         if not np.isfinite(w).any() or w.sum() <= 0:
             w[:] = 1.0
     else:
-        print(f"[提示] 未找到人口栅格：{tif_path}，退化为均匀权重。")
+        print(f"[INFO] Population raster not found: {tif_path}, fallback to uniform weights")
         w = np.ones(grid.m * grid.n, dtype=float)
     return w
 
 def population_distribution_uniform(cell_count):
-    """构造全球均匀分布的人口权重,1"""
+    """Return uniform weights when no raster-based weighting is desired."""
 
     return np.ones(cell_count, dtype=float)
 
 @dataclass
 class PopulationAllocation:
-    """封装人口分配结果，便于后续业务模块共享。"""
+    """Container for population allocation results shared across modules."""
 
     users: List[Any]
     grid: EqualAreaGrid
@@ -99,15 +99,16 @@ def build_users_by_population(
     delta_a,
     delta_b,
     distribution,
+    max_users_per_cell=None,
 ):
     if lat_range is None or lon_range is None:
-        raise ValueError("lat_range 和 lon_range 需由调用方提供。")
+        raise ValueError('lat_range and lon_range must be provided by the caller')
     if delta_a is None or delta_b is None:
-        raise ValueError("delta_a 和 delta_b 需由调用方提供（单位：千米）。")
+        raise ValueError('delta_a and delta_b must be provided (kilometres)')
     if not distribution:
-        raise ValueError("distribution 需由调用方显式指定（如 'density' 或 'uniform'）。")
+        raise ValueError("distribution must be specified (e.g. 'density' or 'uniform')")
     
-    """根据指定人口分布模式在网格中心生成用户。"""
+    """Generate user objects at grid centres based on chosen population distribution."""
     lat_min, lat_max = _normalise_interval(lat_range, lat_range)
     lon_min, lon_max = _normalise_interval(lon_range, lon_range)
 
@@ -123,7 +124,12 @@ def build_users_by_population(
     centers = grid.centres
     G = grid.m * grid.n
 
-    total_users = max(total_users, G)  # 保证每格至少 1 人
+    total_users = max(total_users, G)  # 保证每格至少 1 用户
+
+    if max_users_per_cell is None:
+        max_cap = total_users
+    else:
+        max_cap = max(1, int(max_users_per_cell))
 
     # 1) 根据选择的模式获取人口权重
     if distribution == "uniform":
@@ -140,30 +146,30 @@ def build_users_by_population(
             lon_max,
         )
 
-    raw = w / w.sum() * total_users
-    flo = np.floor(raw).astype(int)
-    flo = np.minimum(flo, max_cap)
-    alloc = flo
-    remaining = total_users - alloc.sum()
-    if remaining < 0:
-        raise ValueError("整数分配结果超过总用户数，请检查人口权重。")
-    if remaining > 0:
-        residual = raw - flo
-        available = np.full(G, max_cap, dtype=int) - alloc
-        order = np.argsort(-residual)
-        for idx in order:
-            if remaining <= 0:
-                break
-            if available[idx] <= 0:
-                continue
-            take = min(available[idx], remaining)
-            alloc[idx] += int(take)
-            available[idx] -= int(take)
-            remaining -= int(take)
+        raw = w / w.sum() * total_users
+        flo = np.floor(raw).astype(int)
+        flo = np.minimum(flo, max_cap)
+        alloc = flo
+        remaining = total_users - alloc.sum()
+        if remaining < 0:
+            raise ValueError("整数分配结果超过总用户数，请检查人口权重")
         if remaining > 0:
-            raise ValueError("仍有剩余用户无法分配到未超上限的小区中。")
+            residual = raw - flo
+            available = np.full(G, max_cap, dtype=int) - alloc
+            order = np.argsort(-residual)
+            for idx in order:
+                if remaining <= 0:
+                    break
+                if available[idx] <= 0:
+                    continue
+                take = min(available[idx], remaining)
+                alloc[idx] += int(take)
+                available[idx] -= int(take)
+                remaining -= int(take)
+            if remaining > 0:
+                raise ValueError("仍有剩余用户无法分配到未超上限的小区中")
 
-   # 2) 生成用户对象并记录小区归属
+    # 2) 生成用户对象并记录小区归属
     users: List[Any] = []
     cell_user_map: Dict[int, List[Any]] = {cell.cell_id: [] for cell in grid.cells}
     cell_users = []

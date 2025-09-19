@@ -6,7 +6,7 @@ import src.XML_constellation.constellation_evaluation.exists_ISL.delay as DELAY
 # from utils import *
 import math
 from typing import Dict, List, Tuple
-from equal_area_partition import EARTH_RADIUS_KM
+from equal_area_partition import EARTH_RADIUS_KM, EqualAreaGrid, EqualAreaCell
 import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
 import random
 import numpy as np
@@ -33,6 +33,7 @@ def init_user(
     distribution="density",
     total_users=TOTAL_USERS,
     tif_path=POP_TIF_PATH,
+    max_users_per_cell=None,
 ):
     
     delta_a = float(delta_a)
@@ -46,7 +47,8 @@ def init_user(
         lon_range=lon_range,
         delta_a=delta_a,
         delta_b=delta_b,
-        distribution=distribution
+        distribution=distribution,
+        max_users_per_cell=max_users_per_cell
     )
     return allocation
 
@@ -96,6 +98,13 @@ def _normalise_longitude(lon: float) -> float:
         normalised += 360.0
     return normalised - 180.0
 
+def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
+    """Great-circle separation in degrees between two longitudes."""
+    diff = abs(lon_a - lon_b)
+    if diff > 180.0:
+        diff = 360.0 - diff
+    return diff
+
 def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
     """以小区中心点为键构建索引，用于快速查找对置单元。"""
 
@@ -122,30 +131,38 @@ def generate_opposite_t2t_connections(
     max_bandwidth: int,
     min_bandwidth: int,
 ) -> List[T2TuserTraffic]:
-    """按照对置小区规则构造 T2T 连接。"""
+    """Construct T2T connections by pairing approximately antipodal cells."""
 
     grid = allocation.grid
-    cell_lookup = _build_cell_lookup(grid)
-    cell_map = {cell.cell_id: cell for cell in grid.cells}
     visited: set[int] = set()
     connections: List[T2TuserTraffic] = []
+    cells = list(grid.cells)
 
-    for cell in grid.cells:
+    for cell in cells:
         if cell.cell_id in visited:
             continue
 
-        target_lat = -cell.latitude
-        target_lon = _normalise_longitude(cell.longitude + 180.0)
-        target_key = (round(target_lat, 6), round(target_lon, 6))
-        target_cell_id = cell_lookup.get(target_key)
-        if target_cell_id is None:
+        desired_lat = -cell.latitude
+        desired_lon = _normalise_longitude(cell.longitude + 180.0)
+
+        best_cell = None
+        best_score = math.inf
+        for candidate in cells:
+            if candidate.cell_id == cell.cell_id or candidate.cell_id in visited:
+                continue
+            score = abs(candidate.latitude - desired_lat) + _angular_distance_deg(candidate.longitude, desired_lon)
+            if score < best_score:
+                best_score = score
+                best_cell = candidate
+
+        if best_cell is None:
             continue
 
         visited.add(cell.cell_id)
-        visited.add(target_cell_id)
+        visited.add(best_cell.cell_id)
 
         source_users = allocation.cell_user_map.get(cell.cell_id, [])
-        target_users = allocation.cell_user_map.get(target_cell_id, [])
+        target_users = allocation.cell_user_map.get(best_cell.cell_id, [])
 
         if allocation.distribution == "uniform":
             if not source_users or not target_users:
@@ -154,13 +171,8 @@ def generate_opposite_t2t_connections(
             source_pool = list(source_users)
             target_pool = list(target_users)
         else:
-            source_pool = list(source_users) if source_users else [
-                _create_virtual_user(cell)
-            ]
-            target_cell = cell_map[target_cell_id]
-            target_pool = list(target_users) if target_users else [
-                _create_virtual_user(target_cell)
-            ]
+            source_pool = list(source_users) if source_users else [_create_virtual_user(cell)]
+            target_pool = list(target_users) if target_users else [_create_virtual_user(best_cell)]
             if len(source_pool) == 0 and len(target_pool) == 0:
                 continue
             pair_count = max(len(source_pool), len(target_pool))
@@ -173,7 +185,6 @@ def generate_opposite_t2t_connections(
             )
 
     return connections
-
 def generate_centralised_t2c_connections(
     allocation: PopulationAllocation,
     center: central_node,
@@ -257,7 +268,7 @@ def main():
     parser.add_argument('--satellite_capacity', type=int, default=100)
     parser.add_argument('--beam_user_num', type=int, default=8)
     parser.add_argument('--gatway_capacity', type=int, default=1000)
-    parser.add_argument('--connect_num', type=int, default=1000)
+    parser.add_argument('--connect_num', type=int, default=10)
     parser.add_argument(
         '--population_distribution',
         type=str,
@@ -270,6 +281,12 @@ def main():
         type=int,
         default=TOTAL_USERS,
         help='总体用户规模，density 模式下生效。'
+    )
+    parser.add_argument(
+        '--max_users_per_cell',
+        type=int,
+        default=None,
+        help='限制每个小区的最大用户数，缺省表示不设上限'
     )
     args = parser.parse_args()
     run_t2t(args)

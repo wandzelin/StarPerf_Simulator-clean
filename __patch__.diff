@@ -1,0 +1,69 @@
+﻿*** Begin Patch
+*** Update File: main.py
+@@
+-"""Entry point for StarPerf user-to-user (T2T) simulations."""
+-
+-from __future__ import annotations
+-
+-import argparse
+-import math
+-from dataclasses import dataclass
+-from typing import Iterable, List, Sequence, Tuple
+-
+-import numpy as np
+-
+-import src.XML_constellation.constellation_entity.user as USER
+-import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
+-import src.XML_constellation.constellation_connectivity.connectivity_mode_plugin_manager as connectivity_mode_plugin_manager
+-from delay import delay
+-from entity import (
+-    T2TuserTraffic,
+-    U2Svisible,
+-    central_node,
+-    gatway,
+-    satellite_beam,
+-)
+-from equal_area_partition import EqualAreaCell
+-from pop_user_allocator import POP_TIF_PATH, TOTAL_USERS, PopulationAllocation, build_users_by_population
+-from select_satellite import select_weighted
+-from utils import calculate_distance, latilong_to_descartes, plot_andSave, judgePointToSatellite
+-import scipy.constants as C
+-
+-# 仿真参数：总时�?2 小时、时�?60 �?
+-SIMULATION_DURATION = 2 * 60 * 60
+-TIME_SLOT = 60
+-DEFAULT_CENTER_NODE_LOCATION: Tuple[float, float] = (104.0, 35.0)
++"""Entry point for StarPerf user-to-user (T2T) simulations."""
++
++from __future__ import annotations
++
++import argparse
++import math
++from dataclasses import dataclass
++from typing import Iterable, List, Sequence, Tuple
++
++import numpy as np
++import scipy.constants as C
++
++import src.XML_constellation.constellation_entity.user as USER
++import src.constellation_generation.by_XML.constellation_configuration as constellation_configuration
++import src.XML_constellation.constellation_connectivity.connectivity_mode_plugin_manager as connectivity_mode_plugin_manager
++from delay import delay
++from entity import T2TuserTraffic, U2Svisible, satellite_beam
++from equal_area_partition import EqualAreaCell
++from pop_user_allocator import (
++    POP_TIF_PATH,
++    TOTAL_USERS,
++    PopulationAllocation,
++    build_users_by_population,
++)
++from select_satellite import select_weighted
++from utils import (
++    calculate_distance,
++    judgePointToSatellite,
++    latilong_to_descartes,
++    plot_andSave,
++)
++
++TIME_SLOT = 60
+*** End Patch

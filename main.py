@@ -1,4 +1,4 @@
-"""Entry point for StarPerf user-to-user (T2T) simulations."""
+﻿"""Entry point for StarPerf user-to-user (T2T) simulations."""
 
 from __future__ import annotations
 
@@ -115,6 +115,7 @@ def init_gatway(capacity: int) -> List[gatway]:
         for name, lon, lat in gateway_locations
     ]
 
+def init_central_node(capacity, gatways):
 # def generat_random_connect(user_list, connect_num, need_bandwidth, max_bandwidth, min_bandwidth):
 #     connect_tuple = []
 #     user_num = len(user_list)
@@ -133,7 +134,11 @@ def init_gatway(capacity: int) -> List[gatway]:
 #         connect = T2TuserTraffic(user_list[i], gatway_list[j], need_bandwidth, max_bandwidth, min_bandwidth)
 #         connect_tuple.append(connect)
 #     return connect_tuple
-def init_central_node(capacity, gatways):
+def init_central_node(
+    capacity: int,
+    gatways: Sequence[gatway],
+    location: Tuple[float, float] | None = None,
+) -> central_node:
     """构建与信关站星型互联的地面中心节点。"""
 
     if location is None:
@@ -161,9 +166,9 @@ def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
     if diff > 180.0:
         diff = 360.0 - diff
     return diff
-
+#grid=小区类 grid.cells=小区列表 cell=小区
 def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
-    """以小区中心点为键构建索引，用于快速查找对置单元。"""
+    """以小区中心点坐标为键索引小区id，用于快速根据对置小区中心点坐标查找对置小区id。"""
 
     lookup: Dict[Tuple[float, float], int] = {}
     for cell in grid.cells:

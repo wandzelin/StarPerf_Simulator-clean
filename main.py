@@ -103,6 +103,8 @@ def init_user(
     )
 
 def init_gatway(capacity: int) -> List[gatway]:
+    """初始化固定的地面信关站列表。"""
+
     gateway_locations = [
         ("库尔勒", 86.1779, 41.7259),
         ("佳木斯", 130.3189, 46.7993),
@@ -114,26 +116,6 @@ def init_gatway(capacity: int) -> List[gatway]:
         gatway(lon, lat, capacity, gateway_name=name)
         for name, lon, lat in gateway_locations
     ]
-
-def init_central_node(capacity, gatways):
-# def generat_random_connect(user_list, connect_num, need_bandwidth, max_bandwidth, min_bandwidth):
-#     connect_tuple = []
-#     user_num = len(user_list)
-#     for _ in range(connect_num):
-#         i, j = random.sample(range(user_num), 2)
-#         connect = T2TuserTraffic(user_list[i], user_list[j], need_bandwidth, max_bandwidth, min_bandwidth)
-#         connect_tuple.append(connect)
-#     return connect_tuple
-
-# def generat_random_t2c_connect(user_list, gatway_list, connect_num, need_bandwidth, max_bandwidth, min_bandwidth):
-#     connect_tuple = []
-#     user_num = len(user_list)
-#     gatway_num = len(gatway_list)
-#     for _ in range(connect_num):
-#         i, j = random.sample(range(user_num), 1)[0], random.sample(range(gatway_num), 1)[0]
-#         connect = T2TuserTraffic(user_list[i], gatway_list[j], need_bandwidth, max_bandwidth, min_bandwidth)
-#         connect_tuple.append(connect)
-#     return connect_tuple
 def init_central_node(
     capacity: int,
     gatways: Sequence[gatway],
@@ -193,7 +175,7 @@ def generate_opposite_t2t_connections(
     max_bandwidth: int,
     min_bandwidth: int,
 ) -> List[T2TuserTraffic]:
-    """Construct T2T connections by pairing approximately antipodal cells."""
+    """通过对置小区配对构造 T2T 连接。"""
 
     connections: List[T2TuserTraffic] = []
     visited: set[int] = set()
@@ -207,6 +189,7 @@ def generate_opposite_t2t_connections(
         if partner is None:
             continue
 
+        # 标记已配对的小区，避免重复建立连接
         visited.add(cell.cell_id)
         visited.add(partner.cell_id)
 
@@ -238,6 +221,8 @@ def _find_opposite_cell(
     candidates: Sequence[EqualAreaCell],
     visited: Iterable[int],
 ) -> EqualAreaCell | None:
+    """寻找当前小区的最佳对置小区。"""
+
     desired_lat = -cell.latitude
     desired_lon = _normalise_longitude(cell.longitude + 180.0)
 
@@ -264,6 +249,8 @@ def _iterate_user_pairs(
     target_cell: EqualAreaCell,
     distribution: str,
 ):
+    """根据人口分布策略生成用户对。"""
+
     if distribution == "uniform":
         if not source_users or not target_users:
             return
@@ -389,13 +376,14 @@ def main():
     print("t2t done")
 
 def run_t2t(config: SimulationConfig):
-    allocation = init_user(
+    """运行端到端 T2T 仿真流程。"""
 
+    allocation = init_user(
         distribution=config.population_distribution,
         total_users=config.total_users,
-
     )
 
+    # 依据对置小区生成端到端用户连接
     connections = generate_opposite_t2t_connections(
         allocation,
         config.need_bandwidth,
@@ -404,7 +392,8 @@ def run_t2t(config: SimulationConfig):
     )
 
     constellation = constellation_configuration.constellation_configuration(
-        dT=TIME_SLOT, constellation_name=config.constellation_name
+        dT=TIME_SLOT,
+        constellation_name=config.constellation_name,
     )
     shell = constellation.shells[0]
     satellites = init_satellite(
@@ -414,19 +403,20 @@ def run_t2t(config: SimulationConfig):
         config.beam_user_num,
     )
 
-    connectionModePluginManager = (
-        connectivity_mode_plugin_manager.connectivity_mode_plugin_manager()
-    )
-    connectionModePluginManager.set_connection_mode(plugin_name="positive_Grid")
-    connectionModePluginManager.execute_connection_policy(
-        constellation=constellation, dT=TIME_SLOT
+    # 设置并执行连接策略，确保卫星网络拓扑已更新
+    connection_manager = connectivity_mode_plugin_manager.connectivity_mode_plugin_manager()
+    connection_manager.set_connection_mode(plugin_name="positive_Grid")
+    connection_manager.execute_connection_policy(
+        constellation=constellation,
+        dT=TIME_SLOT,
     )
 
     delay_list: List[List[float]] = []
     shell_cycle_steps = int(shell.orbit_cycle / TIME_SLOT) + 2
 
+    # 按时隙遍历，逐个连接计算链路时延
     for t in range(1, shell_cycle_steps):
-        slot_delays = []
+        slot_delays: List[float] = []
         for connection in connections:
             delay_value = _evaluate_connection_delay(
                 connection,
@@ -450,7 +440,12 @@ def run_t2t(config: SimulationConfig):
         print(delay_list[0])
 
     all_delay = [value for slot in delay_list for value in slot]
-    all_beam_load = [load for sat in satellites for beam in sat.beams for load in beam.load]
+    all_beam_load = [
+        load
+        for sat in satellites
+        for beam in sat.beams
+        for load in beam.load
+    ]
 
     max_bandwidth_ratio_list, min_bandwidth_ratio_list = _summarise_bandwidth_ratios(
         connections
@@ -500,6 +495,7 @@ def _evaluate_connection_delay(
     shell_name: str,
 ):
     users = [connection.source, connection.target]
+    # 构建用户与卫星的可见性矩阵，用于后续卫星选择
     visibility = init_U2Svisible(
         users,
         satellites,
@@ -523,6 +519,7 @@ def _evaluate_connection_delay(
     user1_x, user1_y, user1_z = latilong_to_descartes(users[0], "user", t)
     user2_x, user2_y, user2_z = latilong_to_descartes(users[1], "user", t)
 
+    # 判断用户与选中卫星之间的可见性是否满足仰角要求
     if not (
         judgePointToSatellite(
             source_sat_x,
@@ -553,6 +550,8 @@ def _evaluate_connection_delay(
 
 
 def _summarise_bandwidth_ratios(connections: Sequence[T2TuserTraffic]):
+    """统计连接达到最小/最大带宽需求的比例。"""
+
     max_ratios: List[float] = []
     min_ratios: List[float] = []
 
@@ -580,15 +579,12 @@ def run_t2c(args):
     satellite_capacity = args.satellite_capacity
     beam_user_num = args.beam_user_num
     gatway_capacity = args.gatway_capacity
-    connect_num = args.connect_num
+
     allocation = init_user(
         distribution=args.population_distribution,
         total_users=args.total_users,
     )
-    users = allocation.users
-    user_num = len(users)
     gatways = init_gatway(gatway_capacity)
-    gatway_num = len(gatways)
     center = init_central_node(gatway_capacity, gatways)
     connect_tuple = generate_centralised_t2c_connections(
         allocation,
@@ -599,43 +595,89 @@ def run_t2c(args):
     )
     actual_connect_num = len(connect_tuple)
 
-    constellation_name = 'China'
+    constellation_name = "China"
     dT = TIME_SLOT
-    constellation = constellation_configuration.constellation_configuration(dT=dT, constellation_name=constellation_name)
+    constellation = constellation_configuration.constellation_configuration(
+        dT=dT,
+        constellation_name=constellation_name,
+    )
     sh = constellation.shells[0]
     shell_name = sh.shell_name
     satellites = init_satellite(sh, satellite_capacity, beam_num, beam_user_num)
 
-    # U2Svisible_matrix = init_U2Svisible(users, satellites, min_bandwidth, max_bandwidth, min_visible_angle)
+    connection_manager = connectivity_mode_plugin_manager.connectivity_mode_plugin_manager()
+    connection_manager.set_connection_mode(plugin_name="positive_Grid")
+    connection_manager.execute_connection_policy(constellation=constellation, dT=dT)
 
-    connectionModePluginManager = connectivity_mode_plugin_manager.connectivity_mode_plugin_manager()
-    connectionModePluginManager.set_connection_mode(plugin_name="positive_Grid")
-    connectionModePluginManager.execute_connection_policy(constellation=constellation , dT=dT)
-    
-    delay_list = []
-    # 在 2 小时内按 60 秒时隙推进仿真
-    # simulation_steps = SIMULATION_DURATION // TIME_SLOT
-    # for t in range(1, int(simulation_steps) + 1):
-    for t in range(1, (int)(sh.orbit_cycle / dT) + 2, 1):
-        connect_delay = []
+    delay_list: List[List[float]] = []
+    for t in range(1, int(sh.orbit_cycle / dT) + 2):
+        connect_delay: List[float] = []
         for connect in connect_tuple:
             user1, user2 = connect.source, connect.target
             connect_users = [user1, user2]
-            U2Svisible_matrix = init_U2Svisible(connect_users, satellites, t, min_bandwidth, max_bandwidth, min_visible_angle)
-            # source_satellite = select_nearest(user1, satellites, t)
-            # target_satellite = select_nearest(user2, satellites, t)
-            # user1_U2Svisible_row = U2Svisible_matrix[users.index(user1)]
-            # user2_U2Svisible_row = U2Svisible_matrix[users.index(user2)]
-            # U2Svisible_matrix = [user1_U2Svisible_row, user2_U2Svisible_row]
-            #source_satellite, target_satellite = select_nearest(connect, U2Svisible_matrix, satellites, t, 't2c')
-            source_satellite, target_satellite = select_weighted(connect, U2Svisible_matrix, satellites, t, 't2c')
-            if source_satellite != None and target_satellite != None:
-                source_sat_x, source_sat_y, source_sat_z = latilong_to_descartes(source_satellite, 'satellite', t)
-                target_sat_x, target_sat_y, target_sat_z = latilong_to_descartes(target_satellite, 'satellite', t)
-                user1_x, user1_y, user1_z = latilong_to_descartes(user1, 'user', t)
-                user2_x, user2_y, user2_z = latilong_to_descartes(user2, 'user', t)
-                if judgePointToSatellite(source_sat_x, source_sat_y, source_sat_z, user1_x, user1_y, user1_z, min_visible_angle) and judgePointToSatellite(target_sat_x, target_sat_y, target_sat_z, user2_x, user2_y, user2_z, min_visible_angle):
-                    u2u_delay = delay(constellation_name, source_satellite, target_satellite, shell_name, t) + 2*calculate_distance(user1, source_satellite, t)/(C.c/1000) + 2*calculate_distance(user2, target_satellite, t)/(C.c/1000)
+            visibility_matrix = init_U2Svisible(
+                connect_users,
+                satellites,
+                t,
+                min_bandwidth,
+                max_bandwidth,
+                min_visible_angle,
+            )
+            source_satellite, target_satellite = select_weighted(
+                connect,
+                visibility_matrix,
+                satellites,
+                t,
+                "t2c",
+            )
+            if source_satellite is not None and target_satellite is not None:
+                source_sat_x, source_sat_y, source_sat_z = latilong_to_descartes(
+                    source_satellite,
+                    "satellite",
+                    t,
+                )
+                target_sat_x, target_sat_y, target_sat_z = latilong_to_descartes(
+                    target_satellite,
+                    "satellite",
+                    t,
+                )
+                user1_x, user1_y, user1_z = latilong_to_descartes(user1, "user", t)
+                user2_x, user2_y, user2_z = latilong_to_descartes(user2, "user", t)
+                if (
+                    judgePointToSatellite(
+                        source_sat_x,
+                        source_sat_y,
+                        source_sat_z,
+                        user1_x,
+                        user1_y,
+                        user1_z,
+                        min_visible_angle,
+                    )
+                    and judgePointToSatellite(
+                        target_sat_x,
+                        target_sat_y,
+                        target_sat_z,
+                        user2_x,
+                        user2_y,
+                        user2_z,
+                        min_visible_angle,
+                    )
+                ):
+                    u2u_delay = (
+                        delay(
+                            constellation_name,
+                            source_satellite,
+                            target_satellite,
+                            shell_name,
+                            t,
+                        )
+                        + 2
+                        * calculate_distance(user1, source_satellite, t)
+                        / (C.c / 1000)
+                        + 2
+                        * calculate_distance(user2, target_satellite, t)
+                        / (C.c / 1000)
+                    )
                     connect_delay.append(u2u_delay)
 
         calculate_satellite_load(satellites)
@@ -647,27 +689,23 @@ def run_t2c(args):
         if connect_delay:
             delay_list.append(connect_delay)
 
-    # cdf_list = [item[0] for item in delay_list]
-    # print(delay_list[0])
-
-    
-    all_delay = []
+    all_delay: List[float] = []
     for connect_delay in delay_list:
         all_delay.extend(connect_delay)
 
-    all_beam_load = []
+    all_beam_load: List[float] = []
     for satellite in satellites:
         for beam in satellite.beams:
             all_beam_load.extend(beam.load)
-    
-    all_gatway_load = []
+
+    all_gatway_load: List[float] = []
     for gatway in gatways:
         all_gatway_load.extend(gatway.load)
 
     all_center_load = list(center.load)
 
-    max_bandwidth_ratio_list = []
-    min_bandwidth_ratio_list = []
+    max_bandwidth_ratio_list: List[float] = []
+    min_bandwidth_ratio_list: List[float] = []
     for connect in connect_tuple:
         max_bandwidth_ratio = 0
         min_bandwidth_ratio = 0
@@ -682,11 +720,19 @@ def run_t2c(args):
             min_bandwidth_ratio_list.append(min_bandwidth_ratio / length)
 
     p95_delay = float(np.percentile(all_delay, 95)) if all_delay else 0.0
-    p95_beam_load  = float(np.percentile(all_beam_load, 95)) if all_beam_load else 0.0
+    p95_beam_load = float(np.percentile(all_beam_load, 95)) if all_beam_load else 0.0
     p95_gateway_load = float(np.percentile(all_gatway_load, 95)) if all_gatway_load else 0.0
     p95_center_load = float(np.percentile(all_center_load, 95)) if all_center_load else 0.0
-    p95_max_bandwidth_ratio = float(np.percentile(max_bandwidth_ratio_list, 95)) if max_bandwidth_ratio_list else 0.0
-    p95_min_bandwidth_ratio  = float(np.percentile(min_bandwidth_ratio_list, 95)) if min_bandwidth_ratio_list else 0.0
+    p95_max_bandwidth_ratio = (
+        float(np.percentile(max_bandwidth_ratio_list, 95))
+        if max_bandwidth_ratio_list
+        else 0.0
+    )
+    p95_min_bandwidth_ratio = (
+        float(np.percentile(min_bandwidth_ratio_list, 95))
+        if min_bandwidth_ratio_list
+        else 0.0
+    )
     print(
         "t2c[P95] delay = {:.3f}, beam_load = {:.3f}, gateway_load = {:.3f}, center_load = {:.3f}, "
         "max_bandwidth_ratio = {:.3f}, min_bandwidth_ratio = {:.3f}".format(
@@ -698,12 +744,30 @@ def run_t2c(args):
             p95_min_bandwidth_ratio,
         )
     )
-    plot_andSave(max_bandwidth_ratio_list, './t2c_max_bandwidth_ratio_cdf_connect_{}.png'.format(actual_connect_num))
-    plot_andSave(min_bandwidth_ratio_list, './t2c_min_bandwidth_ratio_cdf_connect_{}.png'.format(actual_connect_num))
-    plot_andSave(all_delay, './t2c_delay_cdf_connect_{}.png'.format(actual_connect_num))
-    plot_andSave(all_beam_load, './t2c_beam_load_cdf_connect_{}.png'.format(actual_connect_num))
-    plot_andSave(all_gatway_load, './t2c_gatway_load_cdf_connect_{}.png'.format(actual_connect_num))
+    plot_andSave(
+        max_bandwidth_ratio_list,
+        "./t2c_max_bandwidth_ratio_cdf_connect_{}.png".format(actual_connect_num),
+    )
+    plot_andSave(
+        min_bandwidth_ratio_list,
+        "./t2c_min_bandwidth_ratio_cdf_connect_{}.png".format(actual_connect_num),
+    )
+    plot_andSave(
+        all_delay,
+        "./t2c_delay_cdf_connect_{}.png".format(actual_connect_num),
+    )
+    plot_andSave(
+        all_beam_load,
+        "./t2c_beam_load_cdf_connect_{}.png".format(actual_connect_num),
+    )
+    plot_andSave(
+        all_gatway_load,
+        "./t2c_gatway_load_cdf_connect_{}.png".format(actual_connect_num),
+    )
     if all_center_load:
-        plot_andSave(all_center_load, './t2c_center_load_cdf_connect_{}.png'.format(actual_connect_num))
+        plot_andSave(
+            all_center_load,
+            "./t2c_center_load_cdf_connect_{}.png".format(actual_connect_num),
+        )
 if __name__ == '__main__':
     main()

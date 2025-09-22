@@ -1,4 +1,4 @@
-# Description: use GHS-POP raster to allocate users onto a 10x10 degree grid
+﻿# Description: use GHS-POP raster to allocate users onto a 10x10 degree grid
 # Notes: ensure at least one user per cell; fallback to uniform weights when raster missing
 import math
 import os
@@ -11,7 +11,7 @@ from equal_area_partition import EARTH_RADIUS_KM, approximate_equal_area_grid, E
 
 
 POP_TIF_PATH = "data/pop/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif"  # 人口“人数”GeoTIFF（WGS84, 30″）
-TOTAL_USERS  = 1944  # 全球总用户数
+TOTAL_USERS  = 300 # 全球总用户数
 
 
 def _normalise_interval(value, default):
@@ -37,22 +37,20 @@ def population_distribution_density(
 ):
     """Compute per-cell population weights from raster data."""
 
-    half_lon_deg = math.degrees(grid.step_a / (2.0 * grid.radius_km))
-    half_sin = grid.step_b / (2.0 * grid.radius_km)
+    cell_count = len(grid.cells)
+    if cell_count == 0:
+        return np.array([], dtype=float)
 
     if tif_path and os.path.exists(tif_path):
         with rasterio.open(tif_path) as ds:
-            weights = []
-            lon_offset = half_lon_deg
-            sin_half = half_sin
-            for lat, lon in centers:
-                sin_lat = math.sin(math.radians(lat))
-                sin_bottom = max(-1.0, min(1.0, sin_lat - sin_half))
-                sin_top = max(-1.0, min(1.0, sin_lat + sin_half))
-                bottom = max(lat_min, math.degrees(math.asin(sin_bottom)))
-                top = min(lat_max, math.degrees(math.asin(sin_top)))
-                left = max(lon_min, lon - lon_offset)
-                right = min(lon_max, lon + lon_offset)
+            weights: List[float] = []
+            for cell in grid.cells:
+                lat_half = cell.lat_step / 2.0
+                lon_half = cell.lon_step / 2.0
+                bottom = max(lat_min, cell.latitude - lat_half)
+                top = min(lat_max, cell.latitude + lat_half)
+                left = max(lon_min, cell.longitude - lon_half)
+                right = min(lon_max, cell.longitude + lon_half)
                 if right <= left or top <= bottom:
                     weights.append(0.0)
                     continue
@@ -64,14 +62,14 @@ def population_distribution_density(
                 ).astype(float)
                 if ds.nodata is not None:
                     arr[arr == ds.nodata] = np.nan
-                arr[arr < 0] = np.nan  # GHS-POP 常见 NoData = -200
-                weights.append(np.nansum(arr))
+                arr[arr < 0] = np.nan
+                weights.append(float(np.nansum(arr)))
         w = np.array(weights, dtype=float)
         if not np.isfinite(w).any() or w.sum() <= 0:
             w[:] = 1.0
     else:
         print(f"[INFO] Population raster not found: {tif_path}, fallback to uniform weights")
-        w = np.ones(grid.m * grid.n, dtype=float)
+        w = np.ones(cell_count, dtype=float)
     return w
 
 def population_distribution_uniform(cell_count):
@@ -120,7 +118,7 @@ def build_users_by_population(
         delta_b,
     )
     centers = grid.centres
-    G = grid.m * grid.n
+    G = len(grid.cells)
 
     total_users = int(total_users)
     if total_users < 0:
@@ -128,12 +126,8 @@ def build_users_by_population(
 
     # 1) 根据选择的模式获取人口权重
     if distribution == "uniform":
-        base = total_users // G
-        remainder = total_users % G
-        alloc = np.full(G, base, dtype=int)
-        if remainder > 0:
-            # 将余数分配给前 remainder 个小区，保持确定性
-            alloc[:remainder] += 1
+        alloc = np.ones(G, dtype=int) if G else np.array([], dtype=int)
+        total_users = len(alloc)
     else:
         w = population_distribution_density(
             centers,

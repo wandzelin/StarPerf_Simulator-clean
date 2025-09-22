@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
 
@@ -20,9 +20,9 @@ from entity import (
     gatway,
     satellite_beam,
 )
-from equal_area_partition import EqualAreaCell
+from equal_area_partition import EqualAreaCell, EqualAreaGrid
 from pop_user_allocator import POP_TIF_PATH, TOTAL_USERS, PopulationAllocation, build_users_by_population
-from select_satellite import select_weighted
+from select_satellite import select_weighted, set_selection_mode
 from utils import calculate_distance, latilong_to_descartes, plot_andSave, judgePointToSatellite
 import scipy.constants as C
 
@@ -34,8 +34,6 @@ DEFAULT_CENTER_NODE_LOCATION: Tuple[float, float] = (104.0, 35.0)
 
 @dataclass
 class SimulationConfig:
-    """Collects run-time parameters for a T2T simulation."""
-
     min_bandwidth: int = 10
     max_bandwidth: int = 30
     min_visible_angle: int = 10
@@ -47,7 +45,10 @@ class SimulationConfig:
     beam_user_num: int = 8
     gatway_capacity: int = 1000
     connect_num: int = 10
-    population_distribution: str = "density"
+    population_distribution: str = "uniform"  # "density" or "uniform"
+    selection_mode: str = "nearest"  # "nearest" or "weighted"
+    shell: str = "shell2"  # "shell1" or "shell2"
+    density_total_users: int = TOTAL_USERS
     total_users: int = TOTAL_USERS
     constellation_name: str = "China"
     center_node_location: Tuple[float, float] = DEFAULT_CENTER_NODE_LOCATION
@@ -73,6 +74,12 @@ class SimulationConfig:
             raise ValueError(
                 "population_distribution must be either 'density' or 'uniform'"
             )
+        if self.selection_mode not in {"nearest", "weighted"}:
+            raise ValueError("selection_mode must be either 'nearest' or 'weighted'")
+        if self.shell not in {"shell1", "shell2"}:
+            raise ValueError("shell must be either 'shell1' or 'shell2'")
+        if self.density_total_users < 0:
+            raise ValueError("density_total_users must be non-negative")
         if self.total_users < 0:
             raise ValueError("total_users must be non-negative")
         return self
@@ -148,6 +155,7 @@ def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
     if diff > 180.0:
         diff = 360.0 - diff
     return diff
+
 #grid=小区类 grid.cells=小区列表 cell=小区
 def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
     """以小区中心点坐标为键索引小区id，用于快速根据对置小区中心点坐标查找对置小区id。"""
@@ -335,45 +343,86 @@ def init_U2Svisible(users, satellites, t, min_bandwidth, max_bandwidth, min_visi
 
 def parse_args() -> SimulationConfig:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--min_bandwidth", type=int, default=10)
-    parser.add_argument("--max_bandwidth", type=int, default=30)
-    parser.add_argument("--min_visible_angle", type=int, default=10)
-    parser.add_argument("--need_bandwidth", type=int, default=10)
-    parser.add_argument("--connect_min_bandwidth", type=int, default=15)
-    parser.add_argument("--connect_max_bandwidth", type=int, default=20)
-    parser.add_argument("--beam_num", type=int, default=7)
-    parser.add_argument("--satellite_capacity", type=int, default=100)
-    parser.add_argument("--beam_user_num", type=int, default=8)
-    parser.add_argument("--gatway_capacity", type=int, default=1000)
-    parser.add_argument("--connect_num", type=int, default=10)
+    defaults = SimulationConfig().validate()
+    parser.set_defaults(**vars(defaults))
+    parser.add_argument("--min_bandwidth", type=int, help="链路最小带宽")
+    parser.add_argument("--max_bandwidth", type=int, help="链路最大带宽")
+    parser.add_argument("--min_visible_angle", type=int, help="卫星可见最小仰角")
+    parser.add_argument("--need_bandwidth", type=int, help="业务所需带宽")
+    parser.add_argument("--connect_min_bandwidth", type=int, help="连接最小带宽需求")
+    parser.add_argument("--connect_max_bandwidth", type=int, help="连接最大带宽需求")
+    parser.add_argument("--beam_num", type=int, help="卫星波束数量")
+    parser.add_argument("--satellite_capacity", type=int, help="卫星总容量")
+    parser.add_argument("--beam_user_num", type=int, help="单波束可服务用户数")
+    parser.add_argument("--gatway_capacity", type=int, help="地面网关容量")
+    parser.add_argument("--connect_num", type=int, help="连接数量")
     parser.add_argument(
         "--population_distribution",
         type=str,
         choices=["density", "uniform"],
-        default="density",
-        help="人口分布模式：density 表示真实人口权重，uniform 表示全球均匀分布。",
+        help="人口分布模式（density/uniform）",
+    )
+    parser.add_argument(
+        "--selection_mode",
+        type=str,
+        choices=["nearest", "weighted"],
+        help="卫星选择策略（nearest/weighted）",
+    )
+    parser.add_argument(
+        "--density_total_users",
+        type=int,
+        help="人口密度模式下的总用户数",
+    )
+    parser.add_argument(
+        "--shell",
+        type=str,
+        choices=["shell1", "shell2"],
+        help="星座壳层选择：shell1=108 星，shell2=432 星",
     )
     parser.add_argument(
         "--total_users",
         type=int,
-        default=TOTAL_USERS,
-        help="总体用户规模，density 模式下生效。",
+        help="均匀模式下自定义总用户数",
     )
-
     parser.add_argument(
         "--constellation_name",
         type=str,
-        default="China",
-        help="运行仿真的星座名称，对应 XML 配置与 HDF5 输出。",
+        help="运行仿真的星座名称",
     )
-    return SimulationConfig(**vars(parser.parse_args())).validate()
+    args = parser.parse_args()
+    config = SimulationConfig(**vars(args)).validate()
+    return config
+
+
+
 
 
 def main():
     config = parse_args()
+    set_selection_mode(config.selection_mode)
+    if config.population_distribution == "density":
+        config.total_users = config.density_total_users
     run_t2t(config)
 
     print("t2t done")
+    run_t2c(config)
+    print("t2c done")
+
+
+
+def _select_constellation_shell(constellation, shell_key: str):
+    """Resolve shell identifier from CLI config to actual constellation shell."""
+
+    mapping = {"shell1": 0, "shell2": 1}
+    try:
+        index = mapping[shell_key]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported shell option: {shell_key}") from exc
+    try:
+        return constellation.shells[index]
+    except IndexError as exc:
+        raise ValueError(f"Shell index {index} unavailable in constellation configuration") from exc
+
 
 def run_t2t(config: SimulationConfig):
     """运行端到端 T2T 仿真流程。"""
@@ -395,7 +444,7 @@ def run_t2t(config: SimulationConfig):
         dT=TIME_SLOT,
         constellation_name=config.constellation_name,
     )
-    shell = constellation.shells[0]
+    shell = _select_constellation_shell(constellation, config.shell)
     satellites = init_satellite(
         shell,
         config.satellite_capacity,
@@ -601,7 +650,7 @@ def run_t2c(args):
         dT=dT,
         constellation_name=constellation_name,
     )
-    sh = constellation.shells[0]
+    sh = _select_constellation_shell(constellation, args.shell)
     shell_name = sh.shell_name
     satellites = init_satellite(sh, satellite_capacity, beam_num, beam_user_num)
 

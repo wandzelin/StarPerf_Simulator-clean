@@ -2,7 +2,6 @@ from utils import distance_between_satellite_and_user
 
 _SELECTION_MODE = "weighted"
 
-
 def set_selection_mode(mode: str) -> None:
     """Configure satellite selection strategy ('nearest' or 'weighted')."""
 
@@ -120,6 +119,7 @@ def select_nearest(connect, U2Svisible_matrix, satellites, t, connect_method):
 def select_weighted(connect, U2Svisible_matrix, satellites, t, connect_method):
     if _SELECTION_MODE == "nearest":
         return select_nearest(connect, U2Svisible_matrix, satellites, t, connect_method)
+
     # nearest_satellite_to_user = None
     # satellite_to_user_distance = float('inf')
     source_user = connect.source

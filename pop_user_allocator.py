@@ -11,7 +11,7 @@ from equal_area_partition import EARTH_RADIUS_KM, approximate_equal_area_grid, E
 
 
 POP_TIF_PATH = "data/pop/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif"  # 人口“人数”GeoTIFF（WGS84, 30″）
-TOTAL_USERS  = 300 # 全球总用户数
+TOTAL_USERS  = 500 # 全球总用户数
 
 
 def _normalise_interval(value, default):

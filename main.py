@@ -38,16 +38,16 @@ class SimulationConfig:
     max_bandwidth: int = 30
     min_visible_angle: int = 10
     need_bandwidth: int = 10
-    connect_min_bandwidth: int = 15
-    connect_max_bandwidth: int = 20
+    connect_min_bandwidth: int = 10
+    connect_max_bandwidth: int = 30
     beam_num: int = 7
     satellite_capacity: int = 100
     beam_user_num: int = 8
     gatway_capacity: int = 1000
     connect_num: int = 10
     population_distribution: str = "uniform"  # "density" or "uniform"
-    selection_mode: str = "nearest"  # "nearest" or "weighted"
-    shell: str = "shell2"  # "shell1" or "shell2"
+    selection_mode: str = "weighted"  # "nearest" or "weighted"
+    shell: str = "shell1"  # "shell1" or "shell2"
     density_total_users: int = TOTAL_USERS
     total_users: int = TOTAL_USERS
     constellation_name: str = "China"
@@ -341,64 +341,58 @@ def init_U2Svisible(users, satellites, t, min_bandwidth, max_bandwidth, min_visi
     return matrix
 
 
-def parse_args() -> SimulationConfig:
+def parse_args(defaults: SimulationConfig) -> SimulationConfig:
     parser = argparse.ArgumentParser()
-    defaults = SimulationConfig().validate()
     parser.set_defaults(**vars(defaults))
-    parser.add_argument("--min_bandwidth", type=int, help="链路最小带宽")
-    parser.add_argument("--max_bandwidth", type=int, help="链路最大带宽")
-    parser.add_argument("--min_visible_angle", type=int, help="卫星可见最小仰角")
-    parser.add_argument("--need_bandwidth", type=int, help="业务所需带宽")
-    parser.add_argument("--connect_min_bandwidth", type=int, help="连接最小带宽需求")
-    parser.add_argument("--connect_max_bandwidth", type=int, help="连接最大带宽需求")
-    parser.add_argument("--beam_num", type=int, help="卫星波束数量")
-    parser.add_argument("--satellite_capacity", type=int, help="卫星总容量")
-    parser.add_argument("--beam_user_num", type=int, help="单波束可服务用户数")
-    parser.add_argument("--gatway_capacity", type=int, help="地面网关容量")
-    parser.add_argument("--connect_num", type=int, help="连接数量")
-    parser.add_argument(
-        "--population_distribution",
-        type=str,
-        choices=["density", "uniform"],
-        help="人口分布模式（density/uniform）",
-    )
-    parser.add_argument(
-        "--selection_mode",
-        type=str,
-        choices=["nearest", "weighted"],
-        help="卫星选择策略（nearest/weighted）",
-    )
-    parser.add_argument(
-        "--density_total_users",
-        type=int,
-        help="人口密度模式下的总用户数",
-    )
-    parser.add_argument(
-        "--shell",
-        type=str,
-        choices=["shell1", "shell2"],
-        help="星座壳层选择：shell1=108 星，shell2=432 星",
-    )
-    parser.add_argument(
-        "--total_users",
-        type=int,
-        help="均匀模式下自定义总用户数",
-    )
-    parser.add_argument(
-        "--constellation_name",
-        type=str,
-        help="运行仿真的星座名称",
-    )
+    parser.add_argument('--min_bandwidth', type=int, help='链路最小带宽')
+    parser.add_argument('--max_bandwidth', type=int, help='链路最大带宽')
+    parser.add_argument('--min_visible_angle', type=int, help='卫星可见最小仰角')
+    parser.add_argument('--need_bandwidth', type=int, help='业务所需带宽')
+    parser.add_argument('--connect_min_bandwidth', type=int, help='连接最小带宽需求')
+    parser.add_argument('--connect_max_bandwidth', type=int, help='连接最大带宽需求')
+    parser.add_argument('--beam_num', type=int, help='卫星波束数量')
+    parser.add_argument('--satellite_capacity', type=int, help='卫星总容量')
+    parser.add_argument('--beam_user_num', type=int, help='单波束可服务用户数')
+    parser.add_argument('--gatway_capacity', type=int, help='地面网关容量')
+    parser.add_argument('--connect_num', type=int, help='连接数量')
+    parser.add_argument('--population_distribution', type=str, choices=['density', 'uniform'], help='人口分布模式（density/uniform）。')
+    parser.add_argument('--selection_mode', type=str, choices=['nearest', 'weighted'], help='卫星选择策略（nearest/weighted）。')
+    parser.add_argument('--density_total_users', type=int, help='人口密度模式下的总用户数')
+    parser.add_argument('--shell', type=str, choices=['shell1', 'shell2'], help='星座壳层选择：shell1=108 星，shell2=432 星')
+    parser.add_argument('--total_users', type=int, help='均匀模式下自定义总用户数')
+    parser.add_argument('--constellation_name', type=str, help='运行仿真的星座名称')
     args = parser.parse_args()
-    config = SimulationConfig(**vars(args)).validate()
-    return config
+    merged = vars(defaults).copy()
+    merged.update({k: v for k, v in vars(args).items() if v is not None})
+    return SimulationConfig(**merged).validate()
+
 
 
 
 
 
 def main():
-    config = parse_args()
+    base_config = SimulationConfig(
+        min_bandwidth=10,
+        max_bandwidth=30,
+        min_visible_angle=10,
+        need_bandwidth=10,
+        connect_min_bandwidth=15,
+        connect_max_bandwidth=20,
+        beam_num=7,
+        satellite_capacity=100,
+        beam_user_num=8,
+        gatway_capacity=1000,
+        connect_num=10,
+        population_distribution="density",
+        selection_mode="weighted",
+        shell="shell1",
+        density_total_users=TOTAL_USERS,
+        total_users=TOTAL_USERS,
+        constellation_name="China",
+        center_node_location=DEFAULT_CENTER_NODE_LOCATION,
+    )
+    config = parse_args(base_config)
     set_selection_mode(config.selection_mode)
     if config.population_distribution == "density":
         config.total_users = config.density_total_users

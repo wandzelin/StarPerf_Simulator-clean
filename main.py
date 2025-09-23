@@ -45,8 +45,8 @@ class SimulationConfig:
     beam_user_num: int = 8
     gatway_capacity: int = 1000
     connect_num: int = 10
-    population_distribution: str = "uniform"  # "density" or "uniform"
-    selection_mode: str = "weighted"  # "nearest" or "weighted"
+    population_distribution: str = "density"  # "density" or "uniform"
+    selection_mode: str = "nearest"  # "nearest" or "weighted"
     shell: str = "shell1"  # "shell1" or "shell2"
     density_total_users: int = TOTAL_USERS
     total_users: int = TOTAL_USERS
@@ -372,26 +372,7 @@ def parse_args(defaults: SimulationConfig) -> SimulationConfig:
 
 
 def main():
-    base_config = SimulationConfig(
-        min_bandwidth=10,
-        max_bandwidth=30,
-        min_visible_angle=10,
-        need_bandwidth=10,
-        connect_min_bandwidth=15,
-        connect_max_bandwidth=20,
-        beam_num=7,
-        satellite_capacity=100,
-        beam_user_num=8,
-        gatway_capacity=1000,
-        connect_num=10,
-        population_distribution="density",
-        selection_mode="weighted",
-        shell="shell1",
-        density_total_users=TOTAL_USERS,
-        total_users=TOTAL_USERS,
-        constellation_name="China",
-        center_node_location=DEFAULT_CENTER_NODE_LOCATION,
-    )
+    base_config = SimulationConfig()
     config = parse_args(base_config)
     set_selection_mode(config.selection_mode)
     if config.population_distribution == "density":

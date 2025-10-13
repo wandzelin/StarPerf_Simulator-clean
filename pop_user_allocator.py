@@ -117,8 +117,14 @@ def build_users_by_population(
         delta_a,
         delta_b,
     )
+    cell_count = len(grid.cells)
+    print(
+        f"[INFO] 当前小区划分配置（lat_range=({lat_min:.2f}, {lat_max:.2f}), "
+        f"lon_range=({lon_min:.2f}, {lon_max:.2f}), delta_a={delta_a:.1f}km, "
+        f"delta_b={delta_b:.1f}km）共生成 {cell_count} 个小区"
+    )
     centers = grid.centres
-    G = len(grid.cells)
+    G = cell_count
 
     total_users = int(total_users)
     if total_users < 0:
@@ -137,12 +143,12 @@ def build_users_by_population(
             lat_max,
             lon_min,
             lon_max,
-        )
+        ) # 每个小区的人口权重
 
-        raw = w / w.sum() * total_users
-        flo = np.floor(raw).astype(int)
+        raw = w / w.sum() * total_users # 每个小区的理想用户数（浮点数）
+        flo = np.floor(raw).astype(int) # 每个小区的理想用户数（向下取整）
         alloc = flo
-        remaining = total_users - alloc.sum()
+        remaining = total_users - alloc.sum() # 剩余待分配的用户数
         if remaining < 0:
             raise ValueError("整数分配结果超过总用户数，请检查人口权重")
         if remaining > 0:
@@ -157,14 +163,14 @@ def build_users_by_population(
                 raise ValueError("仍有剩余用户未能分配，请检查权重计算是否正确")
 
     # 2) 生成用户对象并记录小区归属
-    users: List[Any] = []
-    cell_user_map: Dict[int, List[Any]] = {cell.cell_id: [] for cell in grid.cells}
-    cell_users = []
+    users: List[Any] = []  # 所有用户对象
+    cell_user_map: Dict[int, List[Any]] = {cell.cell_id: [] for cell in grid.cells} # 小区ID到用户对象列表的映射
+    cell_users = [] # 每个小区的用户数
     for idx, ((lat, lon), cnt) in enumerate(zip(centers, alloc)):
         cell = grid.cells[idx]
         cell_users.append(int(cnt))
         for _ in range(int(cnt)):
-            user_obj = USER_module.user(lat, lon)
+            user_obj = USER_module.user(lat, lon) # 创建用户对象
             setattr(user_obj, "cell_id", cell.cell_id)
             setattr(user_obj, "cell_row", cell.i)
             setattr(user_obj, "cell_col", cell.j)

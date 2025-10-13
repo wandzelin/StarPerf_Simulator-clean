@@ -1,7 +1,6 @@
 ﻿"""Entry point for StarPerf user-to-user (T2T) simulations."""
 
 from __future__ import annotations
-
 import argparse
 import math
 from dataclasses import dataclass
@@ -36,7 +35,7 @@ DEFAULT_CENTER_NODE_LOCATION: Tuple[float, float] = (104.0, 35.0)
 class SimulationConfig:
     min_bandwidth: int = 10
     max_bandwidth: int = 30
-    min_visible_angle: int = 10
+    min_visible_angle: int = 20   
     need_bandwidth: int = 10
     connect_min_bandwidth: int = 10
     connect_max_bandwidth: int = 30
@@ -85,13 +84,11 @@ class SimulationConfig:
         return self
 
 def init_user(
-
-    
-    lat_range: Tuple[float, float] = (-60, 60),
-    lon_range: Tuple[float, float] = (-90, 90),
-    delta_a: float = 1000,
-    delta_b: float = 1000,
-    distribution: str = "density",
+    distribution: str,
+    lat_range: Tuple[float, float] = (-83, 83),
+    lon_range: Tuple[float, float] = (-180, 180),
+    delta_a: float = 200,
+    delta_b: float = 200,
     total_users: int = TOTAL_USERS,
     tif_path: str = POP_TIF_PATH,
 ) -> PopulationAllocation:
@@ -123,6 +120,7 @@ def init_gatway(capacity: int) -> List[gatway]:
         gatway(lon, lat, capacity, gateway_name=name)
         for name, lon, lat in gateway_locations
     ]
+
 def init_central_node(
     capacity: int,
     gatways: Sequence[gatway],
@@ -160,7 +158,7 @@ def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
 def _build_cell_lookup(grid: EqualAreaGrid) -> Dict[Tuple[float, float], int]:
     """以小区中心点坐标为键索引小区id，用于快速根据对置小区中心点坐标查找对置小区id。"""
 
-    lookup: Dict[Tuple[float, float], int] = {}
+    lookup: Dict[Tuple[float, float], int] = {}  # (latitude, longitude) -> cell_id
     for cell in grid.cells:
         key = (round(cell.latitude, 6), round(_normalise_longitude(cell.longitude), 6))
         lookup[key] = cell.cell_id
@@ -185,14 +183,12 @@ def generate_opposite_t2t_connections(
 ) -> List[T2TuserTraffic]:
     """通过对置小区配对构造 T2T 连接。"""
 
-    connections: List[T2TuserTraffic] = []
-    visited: set[int] = set()
-    cells = list(allocation.grid.cells)
-
+    connections: List[T2TuserTraffic] = [] #存放连接对
+    visited: set[int] = set() #已配对的小区ID集合
+    cells = list(allocation.grid.cells) #所有小区列表
     for cell in cells:
         if cell.cell_id in visited:
             continue
-
         partner = _find_opposite_cell(cell, cells, visited)
         if partner is None:
             continue
@@ -200,11 +196,10 @@ def generate_opposite_t2t_connections(
         # 标记已配对的小区，避免重复建立连接
         visited.add(cell.cell_id)
         visited.add(partner.cell_id)
-
-        source_pool = allocation.cell_user_map.get(cell.cell_id, [])
-        target_pool = allocation.cell_user_map.get(partner.cell_id, [])
-
-        for user_a, user_b in _iterate_user_pairs(
+        source_pool = allocation.cell_user_map.get(cell.cell_id, []) #获取小区内用户列表
+        target_pool = allocation.cell_user_map.get(partner.cell_id, []) #获取对置小区内用户列表
+        # 生成用户连接对
+        for user_a, user_b in _iterate_user_pairs( 
             source_pool,
             target_pool,
             cell,
@@ -221,7 +216,7 @@ def generate_opposite_t2t_connections(
                 )
             )
 
-    return connections
+    return connections #存放所有连接对
 
 
 def _find_opposite_cell(
@@ -242,7 +237,7 @@ def _find_opposite_cell(
             continue
         score = abs(candidate.latitude - desired_lat) + _angular_distance_deg(
             candidate.longitude, desired_lon
-        )
+        ) #小区中心点与理想中心点的曼哈顿距离，越小越好
         if score < best_score:
             best_score = score
             best_cell = candidate
@@ -257,7 +252,7 @@ def _iterate_user_pairs(
     target_cell: EqualAreaCell,
     distribution: str,
 ):
-    """根据人口分布策略生成用户对。"""
+    """从对置小区的用户列表中，根据人口分布策略生成用户对。"""
 
     if distribution == "uniform":
         if not source_users or not target_users:
@@ -266,15 +261,27 @@ def _iterate_user_pairs(
         for idx in range(pair_count):
             yield source_users[idx], target_users[idx]
         return
+    else:
+        # 如果两个小区都没有真实用户，则不进行配对
+        if not source_users and not target_users:
+            return
 
-    source_pool = list(source_users) if source_users else [_create_virtual_user(source_cell)]
-    target_pool = list(target_users) if target_users else [_create_virtual_user(target_cell)]
-    if not source_pool and not target_pool:
-        return
+        source_pool = list(source_users)
+        target_pool = list(target_users)
 
-    pair_count = max(len(source_pool), len(target_pool))
-    for idx in range(pair_count):
-        yield source_pool[idx % len(source_pool)], target_pool[idx % len(target_pool)]
+        # 为用户数少的一方补充虚拟用户，直至数量与多的一方持平
+        diff = len(source_pool) - len(target_pool)
+        if diff > 0:
+            for _ in range(diff):
+                target_pool.append(_create_virtual_user(target_cell))
+        elif diff < 0:
+            for _ in range(-diff):
+                source_pool.append(_create_virtual_user(source_cell))
+
+        # 进行一对一配对
+        pair_count = len(source_pool)
+        for idx in range(pair_count):
+            yield source_pool[idx], target_pool[idx]
 
 
 def generate_centralised_t2c_connections(
@@ -359,7 +366,7 @@ def parse_args(defaults: SimulationConfig) -> SimulationConfig:
     parser.add_argument('--selection_mode', type=str, choices=['nearest', 'weighted'], help='卫星选择策略（nearest/weighted）。')
     parser.add_argument('--density_total_users', type=int, help='人口密度模式下的总用户数')
     parser.add_argument('--shell', type=str, choices=['shell1', 'shell2'], help='星座壳层选择：shell1=108 星，shell2=432 星')
-    parser.add_argument('--total_users', type=int, help='均匀模式下自定义总用户数')
+    parser.add_argument('--total_users', type=int, help='人口密度模式下自定义总用户数')
     parser.add_argument('--constellation_name', type=str, help='运行仿真的星座名称')
     args = parser.parse_args()
     merged = vars(defaults).copy()
@@ -378,10 +385,9 @@ def main():
     if config.population_distribution == "density":
         config.total_users = config.density_total_users
     run_t2t(config)
-
     print("t2t done")
-    run_t2c(config)
-    print("t2c done")
+    # run_t2c(config)
+    # print("t2c done")
 
 
 
